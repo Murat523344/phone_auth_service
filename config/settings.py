@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     # Third-party
     "rest_framework",
     "rest_framework_simplejwt",
+    "drf_spectacular",
     "corsheaders",
     # Local
     "users",
@@ -177,4 +178,36 @@ LOGGING = {
         "handlers": ["console"],
         "level": "INFO",
     },
+}
+
+# --- UI (Django Templates) ---
+LOGIN_URL = "/ui/login/"
+LOGIN_REDIRECT_URL = "/ui/profile/"
+LOGOUT_REDIRECT_URL = "/ui/login/"
+
+# Имена cookie для JWT, чтобы UI-вьюхи могли их читать
+JWT_ACCESS_COOKIE = "tb4_access"
+JWT_REFRESH_COOKIE = "tb4_refresh"
+
+# --- DRF Spectacular (OpenAPI / ReDoc) ---
+REST_FRAMEWORK["DEFAULT_SCHEMA_CLASS"] = "drf_spectacular.openapi.AutoSchema"
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "TB4 — Phone Auth & Referral API",
+    "DESCRIPTION": (
+        "REST API сервиса авторизации по номеру телефона с реферальной системой. "
+        "Стек: Django 5 + DRF + SimpleJWT + PostgreSQL."
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SWAGGER_UI_SETTINGS": {
+        "deepLinking": True,
+        "displayOperationId": True,
+        "persistAuthorization": True,
+    },
+    "TAGS": [
+        {"name": "auth", "description": "Авторизация по SMS-коду"},
+        {"name": "profile", "description": "Профиль и реферальная система"},
+    ],
 }

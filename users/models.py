@@ -1,15 +1,36 @@
+import secrets
 from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.core.validators import RegexValidator
-from django.db import models
+from django.db import models, transaction
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 from django.utils import timezone
 
 phone_validator = RegexValidator(
     regex=r"^\+7\d{10}$",
     message="Телефон должен быть в формате +7XXXXXXXXXX (11 цифр после +).",
 )
+
+# Алфавит для инвайт-кода: цифры + заглавные латинские буквы (base36)
+INVITE_CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+INVITE_CODE_LENGTH = 6
+
+
+def generate_invite_code() -> str:
+    """Генерирует 6-символьный код из цифр и заглавных букв."""
+    return "".join(secrets.choice(INVITE_CODE_ALPHABET) for _ in range(INVITE_CODE_LENGTH))
+
+
+def generate_unique_invite_code(max_attempts: int = 20) -> str:
+    """Гарантирует уникальность кода в таблице User."""
+    for _ in range(max_attempts):
+        code = generate_invite_code()
+        if not User.objects.filter(invite_code=code).exists():
+            return code
+    raise RuntimeError("Не удалось сгенерировать уникальный инвайт-код")
 
 
 class UserManager(BaseUserManager):
@@ -54,8 +75,36 @@ class User(AbstractBaseUser, PermissionsMixin):
     )
     first_name = models.CharField("Имя", max_length=150, blank=True)
     last_name = models.CharField("Фамилия", max_length=150, blank=True)
+
+    # --- Реферальная система ---
+    invite_code = models.CharField(
+        "Свой инвайт-код",
+        max_length=INVITE_CODE_LENGTH,
+        unique=True,
+        db_index=True,
+        blank=True,
+        null=True,
+        help_text="6 символов: A-Z0-9. Генерируется автоматически.",
+    )
+    activated_invite_code = models.CharField(
+        "Активированный чужой код",
+        max_length=INVITE_CODE_LENGTH,
+        blank=True,
+        null=True,
+        help_text="Можно активировать только один код.",
+    )
+    referrer = models.ForeignKey(
+        "self",
+        verbose_name="Пригласивший",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="referrals",
+    )
+
     is_active = models.BooleanField("Активен", default=True)
     is_staff = models.BooleanField("Доступ в админку", default=False)
+
     date_joined = models.DateTimeField("Дата регистрации", default=timezone.now)
     last_login = models.DateTimeField("Последний вход", null=True, blank=True)
 
@@ -77,6 +126,64 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def get_short_name(self):
         return self.first_name or self.phone
+
+    # ---------- реферальная логика ----------
+
+    def can_activate_invite(self):
+        return self.activated_invite_code is None
+
+    @transaction.atomic
+    def activate_invite(self, code: str):
+        """
+        Активирует чужой инвайт-код.
+        Возвращает referrer User.
+        Бросает ValueError с понятным сообщением при ошибке.
+        """
+        code = (code or "").strip().upper()
+
+        if not self.can_activate_invite():
+            raise ValueError("Вы уже активировали инвайт-код.")
+        if code == self.invite_code:
+            raise ValueError("Нельзя активировать свой собственный код.")
+
+        try:
+            referrer = User.objects.select_for_update().get(invite_code=code)
+        except User.DoesNotExist as err:
+            raise ValueError("Инвайт-код не найден.") from err
+
+        self.activated_invite_code = referrer.invite_code
+        self.referrer = referrer
+        self.save(update_fields=["activated_invite_code", "referrer"])
+
+        Referral.objects.get_or_create(referrer=referrer, referral=self)
+        return referrer
+
+
+class Referral(models.Model):
+    """Журнал: кто кого привёл."""
+
+    referrer = models.ForeignKey(
+        User,
+        verbose_name="Пригласивший",
+        on_delete=models.CASCADE,
+        related_name="referral_records",
+    )
+    referral = models.ForeignKey(
+        User,
+        verbose_name="Приглашённый",
+        on_delete=models.CASCADE,
+        related_name="referred_by_records",
+    )
+    created_at = models.DateTimeField("Дата активации", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Реферал"
+        verbose_name_plural = "Рефералы"
+        unique_together = ("referrer", "referral")
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.referrer.phone} → {self.referral.phone}"
 
 
 class SMSCode(models.Model):
@@ -129,8 +236,6 @@ class SMSCode(models.Model):
 
     @staticmethod
     def _generate_code(length):
-        import secrets
-
         first = str(secrets.randbelow(9) + 1)
         rest = "".join(str(secrets.randbelow(10)) for _ in range(length - 1))
         return first + rest
@@ -150,3 +255,16 @@ class SMSCode(models.Model):
     def increment_attempts(self):
         self.attempts += 1
         self.save(update_fields=["attempts"])
+
+
+# ---------- сигнал: генерируем invite_code при создании юзера ----------
+
+
+@receiver(post_save, sender=User)
+def _ensure_invite_code(sender, instance, created, **kwargs):
+    if instance.invite_code:
+        return
+    # Через queryset.update, чтобы не зациклить сигнал
+    code = generate_unique_invite_code()
+    User.objects.filter(pk=instance.pk).update(invite_code=code)
+    instance.invite_code = code

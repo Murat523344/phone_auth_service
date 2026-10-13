@@ -1,0 +1,18 @@
+{% extends "users/base.html" %}
+{% block title %}Подтверждение — TB4{% endblock %}
+{% block content %}
+    <h1>Введите код</h1>
+    <p class="muted">Код отправлен на <b>{{ phone }}</b>. Действует 5 минут.</p>
+
+    <form method="post" action="{% url 'ui:verify' %}">
+        {% csrf_token %}
+        <input type="hidden" name="phone" value="{{ phone }}">
+        <label for="code">4-значный код</label>
+        <input type="text" id="code" name="code" maxlength="6" placeholder="1234" required autofocus>
+        <button type="submit" class="btn-block">Войти</button>
+    </form>
+
+    <div class="actions">
+        <a class="btn btn-secondary" href="{% url 'ui:login' %}">← Изменить номер</a>
+    </div>
+{% endblock %}

@@ -1,0 +1,13 @@
+{% extends "users/base.html" %}
+{% block title %}Вход — TB4{% endblock %}
+{% block content %}
+    <h1>Вход по номеру телефона</h1>
+    <p class="muted">Введите номер в формате +7XXXXXXXXXX. Мы отправим 4-значный код.</p>
+
+    <form method="post" action="{% url 'ui:login' %}">
+        {% csrf_token %}
+        <label for="phone">Номер телефона</label>
+        <input type="tel" id="phone" name="phone" placeholder="+79991234567" required pattern="^\+7\d{10}$" value="{{ phone|default:'' }}">
+        <button type="submit" class="btn-block">Получить код</button>
+    </form>
+{% endblock %}

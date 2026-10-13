@@ -1,0 +1,38 @@
+{% extends "users/base.html" %}
+{% block title %}Профиль — TB4{% endblock %}
+{% block content %}
+    <h1>Профиль</h1>
+    <p class="muted">Телефон: <b>{{ user.phone }}</b></p>
+
+    <h3 style="font-size:15px;margin:24px 0 8px;">Ваш инвайт-код</h3>
+    <div class="code">{{ user.invite_code }}</div>
+    <p class="muted" style="margin-top:8px;">Поделитесь им — за каждого приглашённого вы получите бонус.</p>
+
+    <h3 style="font-size:15px;margin:24px 0 8px;">Активированный чужой код</h3>
+    {% if user.activated_invite_code %}
+        <div class="code">{{ user.activated_invite_code }}</div>
+        <p class="muted" style="margin-top:8px;">Пригласивший: <b>{{ user.referrer.phone }}</b></p>
+    {% else %}
+        <form method="post" action="{% url 'ui:activate_invite' %}">
+            {% csrf_token %}
+            <label for="invite_code">Введите чужой код</label>
+            <input type="text" id="invite_code" name="invite_code" maxlength="6" placeholder="ABC123" required style="text-transform:uppercase;">
+            <button type="submit" class="btn-block">Активировать</button>
+        </form>
+    {% endif %}
+
+    <h3 style="font-size:15px;margin:24px 0 8px;">Приглашённые вами ({{ invited_users|length }})</h3>
+    {% if invited_users %}
+        <ul>
+            {% for u in invited_users %}
+                <li>{{ u.phone }} <span class="muted">— {{ u.date_joined|date:"d.m.Y H:i" }}</span></li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p class="muted">Пока никого. Поделитесь своим кодом!</p>
+    {% endif %}
+
+    <div class="actions">
+        <a class="btn btn-secondary" href="{% url 'ui:logout' %}">Выйти</a>
+    </div>
+{% endblock %}
